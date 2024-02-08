@@ -8,6 +8,7 @@ import numpy as np
 from dotenv import load_dotenv
 import time
 from concurrent.futures import ThreadPoolExecutor
+import base64
 
 app = Flask(__name__)
 
@@ -96,7 +97,8 @@ def configure():
 
 def generate_video_stream(rtsp_link, width=640, height=480, frame_reduction_factor=4):
     """
-    Gera o stream de vídeo a partir do link RTSP fornecido com redução de taxa de frames.
+    Gera o stream de vídeo a partir do link RTSP fornecido com redução de taxa de frames,
+    ajustando a resolução do vídeo conforme especificado e aplicando a redução da taxa de frames.
     """
     cap = cv2.VideoCapture(rtsp_link)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
@@ -107,33 +109,25 @@ def generate_video_stream(rtsp_link, width=640, height=480, frame_reduction_fact
         if not ret:
             break
         frame_count += 1
-        # Reduz a taxa de frames enviando somente um frame a cada frame_reduction_factor frames
         if frame_count % frame_reduction_factor != 0:
             continue
-        # Redimensiona o frame para a resolução desejada
         frame = cv2.resize(frame, (width, height))
-        # Codifica o frame em formato JPEG
-        ret, buffer = cv2.imencode('.jpg', frame)
-        if not ret:
-            continue
-        # Converte o frame codificado em bytes e o envia como parte da resposta multipart
-        frame_bytes = buffer.tobytes()
-        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_base64 = base64.b64encode(buffer).decode('utf-8')
+        yield f"data: {frame_base64}\n\n"
+        time.sleep(1 / 30)  # Ajuste a taxa de frames conforme necessário
 
 @app.route('/stream/<market_name>/<int:stream_index>')
 def stream_market(market_name, stream_index):
-    market_name = market_name.lower()  # Converte para minúsculas
+    market_name = market_name.lower()
     if market_name not in streams:
         return jsonify({'error': 'Mercado não encontrado ou não configurado'}), 404
 
-    # Valida se o índice do stream é válido
     if stream_index < 1 or stream_index > len(streams[market_name]['rtsp_links']):
-        return jsonify({'error': 'Índice do stream é válido'}), 404
+        return jsonify({'error': 'Índice do stream inválido'}), 404
 
-    # Acessa o link RTSP específico com base no índice fornecido (ajustado para base 0)
     rtsp_link = streams[market_name]['rtsp_links'][stream_index - 1]
-    return Response(generate_video_stream(rtsp_link), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(generate_video_stream(rtsp_link, 640, 480, 4), mimetype='text/event-stream')
 
 if __name__ == '__main__':
     port = os.getenv('PORT', '8080')  # Porta definida pelo Azure ou a porta 80 por padrão
