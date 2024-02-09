@@ -190,5 +190,5 @@ def delete_configuration(market_name):
 
 
 if __name__ == '__main__':
-    port = os.getenv('PORT', '8080')  # Porta definida pelo Azure ou a porta 80 por padrão
+    port = os.getenv('PORT', '80')  # Porta definida pelo Azure ou a porta 80 por padrão
     app.run(host='0.0.0.0', port=int(port), debug=False)
