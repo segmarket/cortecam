@@ -1,13 +1,11 @@
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify
 import subprocess
 import datetime
 import cv2
 import os
-import numpy as np
 from threading import Thread, Event
 import time
-import base64
-from azure.storage.blob import BlobServiceClient, BlobClient
+import numpy as np
 
 app = Flask(__name__)
 
@@ -15,47 +13,25 @@ recording_processes = {}
 streams = {}
 market_threads = {}
 last_movement_time = {}
-# Configurações do Azure Blob Storage
-CONNECTION_STRING = 'DefaultEndpointsProtocol=https;AccountName=segcam;AccountKey=js1kpBrA+mEufFg/FoN6lgoCpOiSNnyNFeKNy0IcN+GYnj/wX4AO9DLFK6Od3i8BW3VzQ9FR4Zrq+ASt5A5vqA==;EndpointSuffix=core.windows.net'
-CONTAINER_NAME = 'armazenamento'
-
-
-
-def upload_file_to_blob_storage(connection_string, container_name, file_path, blob_name):
-    try:
-        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
-        with open(file_path, "rb") as data:
-            blob_client.upload_blob(data, overwrite=True)
-        print(f"Arquivo {file_path} foi carregado com sucesso para o blob {blob_name} no container {container_name}.")
-    except Exception as e:
-        print(f"Erro ao fazer upload do arquivo: {e}")
-
 
 def start_recording(rtsp_link, market_name, camera_index):
     recording_dir = create_recording_directory(market_name)
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     filename = f"{timestamp}_camera_{camera_index}.mp4"
     filepath = os.path.join(recording_dir, filename)
-    blob_name = f"{market_name}/{timestamp}_camera_{camera_index}.mp4"
 
     # Inicie a gravação com FFmpeg
     process = subprocess.Popen(['ffmpeg', '-i', rtsp_link, '-c', 'copy', filepath], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    return process, filepath, blob_name
+    return process, filepath
 
-def stop_recording(process, filepath, blob_name):
+def stop_recording(process, filepath):
     process.terminate()
     process.wait()
-    # Certifique-se de que esta chamada está passando os argumentos corretamente
-    upload_file_to_blob_storage(CONNECTION_STRING, CONTAINER_NAME, filepath, blob_name)
-    # Considere remover o arquivo local após o upload, se desejado
-    os.remove(filepath)
-
-
-
+    
 def create_recording_directory(market_name):
-    base_dir = os.path.join("recordings", market_name)
+    # Caminho base ajustado para o novo diretório desejado
+    base_dir = os.path.join("/home/dados/data/admin/files", market_name)
     if not os.path.exists(base_dir):
         os.makedirs(base_dir, exist_ok=True)
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -85,7 +61,7 @@ def apply_ignore_area_mask(frame, ignore_area):
     masked_frame = cv2.bitwise_and(frame, frame, mask=mask)
     return masked_frame
 
-def monitor_and_record(rtsp_links, market_name, ignore_area, stop_event, sensibilities):
+def monitor_and_record(rtsp_links, market_name, ignore_area, sensibilities, stop_event):
     global last_movement_time
     caps = [cv2.VideoCapture(link) for link in rtsp_links]
     prev_frames = [None] * len(rtsp_links)
@@ -109,11 +85,10 @@ def monitor_and_record(rtsp_links, market_name, ignore_area, stop_event, sensibi
                         recording_dir = create_recording_directory(market_name)
                     if not recording_processes.get(i):
                         print(f"Movimento detectado na câmera {i+1}. Iniciando a gravação.")
-                        process, filepath, blob_name = start_recording(rtsp_links[i], recording_dir, i+1)
+                        process, filepath = start_recording(rtsp_links[i], market_name, i+1)
                         recording_processes[i] = {
                             "process": process,
-                            "filepath": filepath,
-                            "blob_name": blob_name
+                            "filepath": filepath
                         }
 
                 else:
@@ -141,16 +116,24 @@ def check_stream(rtsp_link):
 def configure():
     data = request.json
     market_name = data.get('market_name')
-    rtsp_links = data.get('rtsp_links')
-    ignore_area = data.get('ignore_area', [])
+    rtsp_configs = data.get('rtsp_links')
+    ignore_area = data.get('ignore_area', [0, 0, 0, 0])
     container_name = data.get('container_name', 'armazenamento')
-    sensibilities = data.get('sensibilities', [100] * len(rtsp_links))  # Default sensibilidade
 
-    if not market_name or not rtsp_links or len(rtsp_links) != len(sensibilities):
+    if not market_name or not rtsp_configs:
         return jsonify({'error': 'Erro: falta parâmetros ou parâmetros inconsistentes'}), 400
 
+    rtsp_links = [config['url'] for config in rtsp_configs]
+    sensibilities = [config.get('sensibilidade', 100) for config in rtsp_configs]
+
     is_update = market_name in streams
-    streams[market_name] = {'rtsp_links': rtsp_links, 'ignore_area': ignore_area, 'container_name': container_name, 'sensibilities': sensibilities}
+
+    streams[market_name] = {
+        'rtsp_links': rtsp_links,
+        'ignore_area': ignore_area,
+        'container_name': container_name,
+        'sensibilities': sensibilities
+    }
 
     if market_name in market_threads:
         market_threads[market_name]['stop_event'].set()
@@ -158,11 +141,12 @@ def configure():
         del market_threads[market_name]
 
     stop_event = Event()
-    new_thread = Thread(target=monitor_and_record, args=(rtsp_links, market_name, ignore_area, stop_event, sensibilities))
+    new_thread = Thread(target=monitor_and_record, args=(rtsp_links, market_name, ignore_area, sensibilities, stop_event))
     new_thread.start()
     market_threads[market_name] = {'thread': new_thread, 'stop_event': stop_event}
 
     return jsonify({'message': 'Configuração atualizada com sucesso' if is_update else 'Configuração criada com sucesso'}), 200
+
 
 
 @app.route('/stream/<market_name>/<int:stream_index>')
@@ -190,5 +174,5 @@ def delete_configuration(market_name):
 
 
 if __name__ == '__main__':
-    port = os.getenv('PORT', '80')  # Porta definida pelo Azure ou a porta 80 por padrão
-    app.run(host='0.0.0.0', port=int(port), debug=False)
+    port = os.getenv('PORT', '8080')  # Porta definida pelo Azure ou a porta 80 por padrão
+    app.run(host='0.0.0.0', port=int(port), debug=True)
