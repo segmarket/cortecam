@@ -1,5 +1,3 @@
-azure-core==1.30.0
-azure-storage-blob==12.19.0
 bidict==0.22.1
 blinker==1.7.0
 certifi==2024.2.2
