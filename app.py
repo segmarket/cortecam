@@ -97,7 +97,7 @@ def monitor_and_record(rtsp_links, market_name, ignore_area, sensibilities, stop
                         if recording_processes.get(i):
                             print(f"Nenhum movimento detectado na câmera {i+1} por um tempo. Parando a gravação.")
                             process_info = recording_processes[i]
-                            stop_recording(process_info["process"], process_info["filepath"], process_info["blob_name"])
+                            stop_recording(process_info["process"], process_info["filepath"])
                             recording_processes[i] = None
 
             prev_frames[i] = frame.copy()
