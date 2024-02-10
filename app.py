@@ -28,7 +28,7 @@ def start_recording(rtsp_link, market_name, camera_index):
 def stop_recording(process, filepath):
     process.terminate()
     process.wait()
-    
+
 def create_recording_directory(market_name):
     # Caminho base ajustado para o novo diretório desejado
     base_dir = os.path.join("/home/dados/data/admin/files", market_name)
@@ -174,5 +174,5 @@ def delete_configuration(market_name):
 
 
 if __name__ == '__main__':
-    port = os.getenv('PORT', '8080')  # Porta definida pelo Azure ou a porta 80 por padrão
+    port = os.getenv('PORT', '8080')
     app.run(host='0.0.0.0', port=int(port), debug=True)
