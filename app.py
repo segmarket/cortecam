@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 import subprocess
 import datetime
 import cv2
@@ -13,6 +13,23 @@ recording_processes = {}
 streams = {}
 market_threads = {}
 last_movement_time = {}
+
+# Middleware para logar detalhes da requisição e resposta
+@app.before_request
+def before_request_logging():
+    g.start_time = time.time()
+
+@app.after_request
+def after_request_logging(response):
+    # Ignora logs para certos caminhos que podem poluir seus registros, se necessário
+    if request.path == '/favicon.ico' or request.path.startswith('/static'):
+        return response
+
+    now = time.time()
+    duration = round(now - g.start_time, 2)
+    log_details = f"Method: {request.method}, Path: {request.path}, Status: {response.status_code}, Duration: {duration}s"
+    print(log_details)  # Considerar usar o módulo logging para maior flexibilidade
+    return response
 
 def start_recording(rtsp_link, market_name, camera_index):
     recording_dir = create_recording_directory(market_name)
